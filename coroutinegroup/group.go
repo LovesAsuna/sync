@@ -40,17 +40,18 @@ type (
 		Go(f TaskFunc) Task
 	}
 	groupImpl struct {
-		ctx              context.Context
-		workerChan       chan *taskImpl
-		sem              chan token
-		cancel           func()
-		errChan          chan error
-		errs             []error
-		taskWg           sync.WaitGroup
-		errWg            sync.WaitGroup
-		globalRetryTimes int32
-		once             sync.Once
-		idGenerator      atomic.Int32
+		ctx                 context.Context
+		workerChan          chan *taskImpl
+		sem                 chan token
+		cancel              func()
+		errChan             chan error
+		errs                []error
+		taskWg              sync.WaitGroup
+		errWg               sync.WaitGroup
+		globalRetryTimes    int32
+		globalRetryInterval time.Duration
+		once                sync.Once
+		idGenerator         atomic.Int32
 	}
 )
 
@@ -89,6 +90,8 @@ func (c *groupImpl) SetGlobalRetryInterval(interval time.Duration) Group {
 	return c
 }
 
+// SetMaxErrorTask Wait will return when number of error tasks reached n, even if not all tasks are completed.
+// default to not allow any error
 func (c *groupImpl) SetMaxErrorTask(n int32) Group {
 	c.errChan = make(chan error, n)
 	return c
@@ -116,6 +119,7 @@ func (c *groupImpl) Go(f TaskFunc) Task {
 		return c.idGenerator.Add(1)
 	})
 	t.SetRetryTimes(c.globalRetryTimes)
+	t.SetRetryInterval(c.globalRetryInterval)
 	return c.pushTask(t)
 }
 
