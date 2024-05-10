@@ -85,6 +85,7 @@ func (c *groupImpl) SetGlobalRetryTimes(n int32) Group {
 	return c
 }
 
+// SetGlobalRetryInterval set each task's retry interval.
 func (c *groupImpl) SetGlobalRetryInterval(interval time.Duration) Group {
 	c.globalRetryInterval = interval
 	return c
