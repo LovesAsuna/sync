@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type (
@@ -13,22 +14,24 @@ type (
 	Group interface {
 		SetLimit(n int32) Group
 		SetGlobalRetryTimes(n int32) Group
+		SetGlobalRetryInterval(interval time.Duration) Group
 		SetMaxErrorTask(n int32) Group
 		Wait() []error
 		Go(f TaskFunc) Task
 	}
 	groupImpl struct {
-		ctx              context.Context
-		workerChan       chan *taskImpl
-		sem              chan token
-		cancel           func()
-		errChan          chan error
-		errs             []error
-		taskWg           sync.WaitGroup
-		errWg            sync.WaitGroup
-		globalRetryTimes int32
-		once             sync.Once
-		idGenerator      atomic.Int32
+		ctx                 context.Context
+		workerChan          chan *taskImpl
+		sem                 chan token
+		cancel              func()
+		errChan             chan error
+		errs                []error
+		taskWg              sync.WaitGroup
+		errWg               sync.WaitGroup
+		globalRetryTimes    int32
+		globalRetryInterval time.Duration
+		once                sync.Once
+		idGenerator         atomic.Int32
 	}
 )
 
@@ -67,6 +70,11 @@ func (c *groupImpl) SetGlobalRetryTimes(n int32) Group {
 	return c
 }
 
+func (c *groupImpl) SetGlobalRetryInterval(interval time.Duration) Group {
+	c.globalRetryInterval = interval
+	return c
+}
+
 // SetMaxErrorTask Wait will return when number of error tasks reached n, even if not all tasks are completed.
 // default to not allow any error
 func (c *groupImpl) SetMaxErrorTask(n int32) Group {
@@ -97,6 +105,7 @@ func (c *groupImpl) Go(f TaskFunc) Task {
 		return c.idGenerator.Add(1)
 	})
 	t.SetRetryTimes(c.globalRetryTimes)
+	t.SetRetryInterval(c.globalRetryInterval)
 	return c.pushTask(t)
 }
 
