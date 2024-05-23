@@ -107,6 +107,10 @@ func (c *groupImpl) pushTask(task *taskImpl) Task {
 		}
 		select {
 		case <-c.ctx.Done():
+			// release sem when context is canceled
+			if c.sem != nil {
+				<-c.sem
+			}
 			c.taskWg.Done()
 			return
 		case c.workerChan <- task:
@@ -148,9 +152,6 @@ func (c *groupImpl) dispatchTask(t *taskImpl) {
 	}
 	if t.err != nil {
 		if t.doSetRetryTimes(func(old int32) (new int32) { return old - 1 }) > 0 {
-			if c.sem != nil {
-				c.sem <- token{}
-			}
 			c.pushTask(t)
 		} else {
 			select {
@@ -192,10 +193,10 @@ func (c *groupImpl) Wait() []error {
 func (c *groupImpl) collectError() {
 	defer c.errWg.Done()
 	for err := range c.errChan {
+		c.errs = append(c.errs, err)
 		// an extra error cause Wait return
 		if len(c.errs) == cap(c.errChan)+1 {
 			break
 		}
-		c.errs = append(c.errs, err)
 	}
 }
