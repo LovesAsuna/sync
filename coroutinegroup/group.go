@@ -151,7 +151,7 @@ func (c *groupImpl) dispatchTask(t *taskImpl) {
 		<-c.sem
 	}
 	if t.err != nil {
-		if t.doSetRetryTimes(func(old int32) (new int32) { return old - 1 }) > 0 {
+		if t.doSetRetryTimes(func(old int32) (new int32) { return old - 1 }) >= 0 {
 			c.pushTask(t)
 		} else {
 			select {
