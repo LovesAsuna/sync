@@ -47,7 +47,7 @@ type (
 		errChan             chan error
 		errs                []error
 		taskWg              sync.WaitGroup
-		errWg               sync.WaitGroup
+		collectErrorDone    chan token
 		globalRetryTimes    int32
 		globalRetryInterval time.Duration
 		once                sync.Once
@@ -64,7 +64,6 @@ func WithContext(ctx context.Context) (Group, context.Context) {
 		workerChan: make(chan *taskImpl),
 		errChan:    make(chan error),
 	}
-	cw.errWg.Add(1)
 	return cw, ctx
 }
 
@@ -186,12 +185,12 @@ func (c *groupImpl) Wait() []error {
 		<-c.ctx.Done()
 		c.collectError()
 	})
-	c.errWg.Wait()
+	<-c.collectErrorDone
 	return c.errs
 }
 
 func (c *groupImpl) collectError() {
-	defer c.errWg.Done()
+	defer close(c.collectErrorDone)
 	for err := range c.errChan {
 		c.errs = append(c.errs, err)
 		// an extra error cause Wait return
