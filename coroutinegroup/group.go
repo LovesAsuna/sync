@@ -44,6 +44,7 @@ type (
 		workerChan          chan *taskImpl
 		sem                 chan token
 		cancel              func()
+		canceled            atomic.Bool
 		errChan             chan error
 		errs                []error
 		taskWg              sync.WaitGroup
@@ -59,10 +60,14 @@ type (
 func WithContext(ctx context.Context) (Group, context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	cw := &groupImpl{
-		ctx:        ctx,
-		cancel:     cancel,
-		workerChan: make(chan *taskImpl),
-		errChan:    make(chan error),
+		ctx:              ctx,
+		workerChan:       make(chan *taskImpl),
+		errChan:          make(chan error),
+		collectErrorDone: make(chan token),
+	}
+	cw.cancel = func() {
+		cw.canceled.Store(true)
+		cancel()
 	}
 	return cw, ctx
 }
@@ -191,6 +196,16 @@ func (c *groupImpl) Wait() []error {
 
 func (c *groupImpl) collectError() {
 	defer close(c.collectErrorDone)
+	if !c.canceled.Load() {
+		for {
+			select {
+			case err := <-c.errChan:
+				c.errs = append(c.errs, err)
+			default:
+				return
+			}
+		}
+	}
 	for err := range c.errChan {
 		c.errs = append(c.errs, err)
 		// an extra error cause Wait return
