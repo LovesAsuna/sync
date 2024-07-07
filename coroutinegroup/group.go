@@ -43,8 +43,7 @@ type (
 		ctx                 context.Context
 		workerChan          chan *taskImpl
 		sem                 chan token
-		cancel              func()
-		canceled            atomic.Bool
+		cancel              func() (first bool)
 		errChan             chan error
 		errs                []error
 		taskWg              sync.WaitGroup
@@ -59,15 +58,16 @@ type (
 // WithContext create a groupImpl with context. It returns a groupImpl and a cancelable context.
 func WithContext(ctx context.Context) (Group, context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
+	canceled := new(atomic.Bool)
 	cw := &groupImpl{
 		ctx:              ctx,
 		workerChan:       make(chan *taskImpl),
 		errChan:          make(chan error),
 		collectErrorDone: make(chan token),
 	}
-	cw.cancel = func() {
-		cw.canceled.Store(true)
+	cw.cancel = func() (first bool) {
 		cancel()
+		return canceled.CompareAndSwap(false, true)
 	}
 	return cw, ctx
 }
@@ -162,7 +162,7 @@ func (c *groupImpl) dispatchTask(t *taskImpl) {
 			case <-c.ctx.Done():
 			case c.errChan <- t.err:
 			default:
-				c.cancel()
+				_ = c.cancel()
 				c.errChan <- t.err
 			}
 		}
@@ -196,7 +196,7 @@ func (c *groupImpl) Wait() []error {
 
 func (c *groupImpl) collectError() {
 	defer close(c.collectErrorDone)
-	if !c.canceled.Load() {
+	if c.cancel() {
 		for {
 			select {
 			case err := <-c.errChan:
