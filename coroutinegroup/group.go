@@ -43,7 +43,8 @@ type (
 		ctx                 context.Context
 		workerChan          chan *taskImpl
 		sem                 chan token
-		cancel              func() (first bool)
+		cancel              func(cause error)
+		canceled            atomic.Bool
 		errChan             chan error
 		errs                []error
 		taskWg              sync.WaitGroup
@@ -58,16 +59,21 @@ type (
 // WithContext create a groupImpl with context. It returns a groupImpl and a cancelable context.
 func WithContext(ctx context.Context) (Group, context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
-	canceled := new(atomic.Bool)
 	cw := &groupImpl{
 		ctx:              ctx,
 		workerChan:       make(chan *taskImpl),
 		errChan:          make(chan error),
 		collectErrorDone: make(chan token),
 	}
-	cw.cancel = func() (first bool) {
+	once := new(sync.Once)
+	cw.cancel = func(cause error) {
+		cw.canceled.Store(true)
 		cancel()
-		return canceled.CompareAndSwap(false, true)
+		if cause != nil {
+			once.Do(func() {
+				cw.errChan <- cause
+			})
+		}
 	}
 	return cw, ctx
 }
@@ -162,8 +168,7 @@ func (c *groupImpl) dispatchTask(t *taskImpl) {
 			case <-c.ctx.Done():
 			case c.errChan <- t.err:
 			default:
-				_ = c.cancel()
-				c.errChan <- t.err
+				c.cancel(t.err)
 			}
 		}
 	} else {
@@ -175,7 +180,7 @@ func (c *groupImpl) Wait() []error {
 	c.once.Do(func() {
 		go func() {
 			c.taskWg.Wait()
-			c.cancel()
+			c.cancel(nil)
 			close(c.workerChan)
 			close(c.errChan)
 			if c.sem != nil {
@@ -196,7 +201,7 @@ func (c *groupImpl) Wait() []error {
 
 func (c *groupImpl) collectError() {
 	defer close(c.collectErrorDone)
-	if c.cancel() {
+	if !c.canceled.Load() {
 		for {
 			select {
 			case err := <-c.errChan:
