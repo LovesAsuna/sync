@@ -39,20 +39,29 @@ type (
 		// Go run a single task and return a task handle.
 		Go(f TaskFunc) Task
 	}
-	groupImpl struct {
-		ctx                 context.Context
-		workerChan          chan *taskImpl
-		sem                 chan token
-		cancel              func(cause error)
-		canceled            atomic.Bool
-		errChan             chan error
-		errs                []error
-		taskWg              sync.WaitGroup
-		collectErrorDone    chan token
+	errStruct struct {
+		errChan          chan error
+		errs             []error
+		collectErrorDone chan token
+	}
+	syncStruct struct {
+		sem    chan token
+		taskWg sync.WaitGroup
+		once   sync.Once
+	}
+	taskStruct struct {
 		globalRetryTimes    int32
 		globalRetryInterval time.Duration
-		once                sync.Once
 		idGenerator         atomic.Int32
+	}
+	groupImpl struct {
+		errStruct
+		syncStruct
+		taskStruct
+		ctx        context.Context
+		workerChan chan *taskImpl
+		cancel     func(cause error)
+		canceled   atomic.Bool
 	}
 )
 
@@ -60,10 +69,12 @@ type (
 func WithContext(ctx context.Context) (Group, context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	cw := &groupImpl{
-		ctx:              ctx,
-		workerChan:       make(chan *taskImpl),
-		errChan:          make(chan error),
-		collectErrorDone: make(chan token),
+		ctx:        ctx,
+		workerChan: make(chan *taskImpl),
+		errStruct: errStruct{
+			errChan:          make(chan error),
+			collectErrorDone: make(chan token),
+		},
 	}
 	once := new(sync.Once)
 	cw.cancel = func(cause error) {
