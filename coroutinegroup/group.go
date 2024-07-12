@@ -76,14 +76,12 @@ func WithContext(ctx context.Context) (Group, context.Context) {
 			collectErrorDone: make(chan token),
 		},
 	}
-	once := new(sync.Once)
 	cw.cancel = func(cause error) {
-		cw.canceled.Store(true)
-		cancel()
-		if cause != nil {
-			once.Do(func() {
+		if cw.canceled.CompareAndSwap(false, true) {
+			cancel()
+			if cancel != nil {
 				cw.errChan <- cause
-			})
+			}
 		}
 	}
 	return cw, ctx
@@ -106,14 +104,11 @@ func (c *groupImpl) SetGlobalRetryTimes(n int32) Group {
 	return c
 }
 
-// SetGlobalRetryInterval set each task's retry interval.
 func (c *groupImpl) SetGlobalRetryInterval(interval time.Duration) Group {
 	c.globalRetryInterval = interval
 	return c
 }
 
-// SetMaxErrorTask Wait will return when number of error tasks reached n, even if not all tasks are completed.
-// default to not allow any error
 func (c *groupImpl) SetMaxErrorTask(n int32) Group {
 	c.errChan = make(chan error, n)
 	return c
@@ -211,20 +206,31 @@ func (c *groupImpl) Wait() []error {
 }
 
 func (c *groupImpl) collectError() {
-	defer close(c.collectErrorDone)
+	defer func() {
+		go func() {
+			for range c.errChan {
+			}
+		}()
+		close(c.collectErrorDone)
+	}()
+	// external cancel(Non-blocking collection)
 	if !c.canceled.Load() {
 		for {
-			select {
-			case err := <-c.errChan:
+			length := len(c.errChan)
+			if length == 0 {
+				break
+			}
+			for i := 0; i < length; i++ {
+				err := <-c.errChan
 				c.errs = append(c.errs, err)
-			default:
-				return
 			}
 		}
+		return
 	}
+	// internal cancel(blocking collection)
 	for err := range c.errChan {
 		c.errs = append(c.errs, err)
-		// an extra error cause Wait return
+		// an additional error is causing the Wait to return, but due to coroutine race condition, this error might not be the real cause
 		if len(c.errs) == cap(c.errChan)+1 {
 			break
 		}
