@@ -79,7 +79,7 @@ func WithContext(ctx context.Context) (Group, context.Context) {
 	cw.cancel = func(cause error) {
 		if cw.canceled.CompareAndSwap(false, true) {
 			cancel()
-			if cancel != nil {
+			if cause != nil {
 				cw.errChan <- cause
 			}
 		}
