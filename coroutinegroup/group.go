@@ -215,6 +215,9 @@ func (c *groupImpl) collectError() {
 	}()
 	// external cancel(Non-blocking collection)
 	if !c.canceled.Load() {
+		if err := context.Cause(c.ctx); err != nil {
+			c.errs = append(c.errs, err)
+		}
 		for {
 			length := len(c.errChan)
 			if length == 0 {
